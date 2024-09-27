@@ -1,12 +1,12 @@
 <template>
   <div id="app">
-    <h1>Calculator</h1>
+    <h1>Coin's Calculator</h1>
     <CalculatorLogic />
   </div>
 </template>
 
 <script>
-import CalculatorLogic from './components/CalculatorLogic.vue'; // 引入 CalculatorLogic 组件
+import CalculatorLogic from './components/CalculatorLogic.vue';
 
 export default {
   name: 'App',
