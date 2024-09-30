@@ -1,6 +1,15 @@
 <template>
-  <div class="CalculatorLogic" :class="{ fadeIn: isVisible }">
+  <div class="CalculatorLogic" :class="{ dark: isDarkmode }">
     <input type="text" v-model="display" readonly class="display"/>
+
+    <canvas 
+      ref="displayCanvas" 
+      class="canvas" 
+      @mousedown="startDrawing" 
+      @mousemove="draw" 
+      @mouseup="stopDrawing"
+    ></canvas>
+
     <div class="buttons">
       <button v-for="button in buttonArray" :key="button" @click="handleClick(button)">
         {{ button }}
@@ -15,14 +24,25 @@
 
   <script>
   import { onMounted, ref } from 'vue';
+  import * as ort from 'onnxruntime-web';
   
   export default {
     name: 'CalculatorLogic',
     setup() {
       const display = ref('');
-      const soundEnabled =ref(false)
-      //load yuyingfangsong
+      const isDrawing = ref(false);
+      const soundEnabled = ref(false);
+      const displayCanvas = ref(null); 
+      const context = ref(null);
+      const isDarkmode = ref(false)
 
+      const drawingPath = [];
+      const onnxModel = ref(null);
+      const isVisible = ref(false); 
+      const displayCanvasRef = ref(null)
+      //buttons
+      const buttonArray = ['1', '2', '3', '+', '4', '5', '6', '-', '7', '8', '9', '*', 'AC', '0', '=', '/', '.', '√'];
+      //load Coin's Voice
       const audioFiles = {
         '0': new Audio('./src/assets/Cal-0.m4a'),
         '1': new Audio('./src/assets/Cal-1.m4a'),
@@ -42,15 +62,84 @@
         'AC': new Audio('./src/assets/Cal-AC.m4a'),
         '.': new Audio('./src/assets/Cal-dot.m4a'),
         '√': new Audio('./src/assets/Cal-SQRT.m4a'),
-        'Sound': new Audio('./src/assets/Cal-Sound.m4a'),
-        'Mode': new Audio('./src/assets/Cal-Darkmode.m4a'),
         };
 
+        onMounted(async () => {
+          try {
+            onnxModel.value = await ort.InferenceSession.create('./public/mnist-12-int8.onnx', {
+              backendHint: 'wasm', 
+            });
+            console.log('Model loaded successfully:', onnxModel.value);
+          } catch (error) {
+            console.error('Error loading model:', error);
+          }
+          
+          const canvas = displayCanvas.value; 
+          context.value = canvas.getContext('2d');
+          if (!context.value) {
+            console.error('Failed to get canvas context');
+          } else {
+            canvas.width = 400; 
+            canvas.height = 150; 
+          }
+        });
 
-      //buttons
-      const buttonArray = ['1', '2', '3', '+', '4', '5', '6', '-', '7', '8', '9', '*', 'AC', '0', '=', '/', '.', '√'];
+        function startDrawing(event) {
+          isDrawing.value = true;
+          const ctx = context.value;
+          ctx.beginPath();
+          ctx.moveTo(event.offsetX, event.offsetY);
+        }
 
-      const isVisible = ref(false);//fade effect conponent
+        function draw(event) {
+          if (!isDrawing.value) return;
+          const ctx = context.value;
+          ctx.lineTo(event.offsetX, event.offsetY);
+          ctx.stroke();
+        }
+
+        function stopDrawing() {
+          isDrawing.value = false;
+          recognizeHandwriting();
+        }
+
+        async function recognizeHandwriting() {
+
+          onMounted(() => {
+            const canvas = displayCanvasRef.value;
+            context.value = canvas.getContext('2d');
+            if (!context.value) {
+              console.error('Failed to get canvas context');
+            } else {
+              canvas.width = 400;
+              canvas.height = 150;
+            }
+          });
+          const imageData = context.value.getImageData(0, 0, canvas.width, canvas.height);
+          const inputTensor = preprocessImage(imageData);
+
+          const output = await onnxModel.value.run({ input: inputTensor });
+
+          const result = output.values().next().value;
+          display.value = result; 
+
+          context.value.clearRect(0, 0, canvas.width, canvas.height);
+        }
+
+        function preprocessImage(imageData) {
+          const inputSize = 28;
+          const inputData = new Float32Array(inputSize * inputSize);
+
+          for (let y = 0; y < inputSize; y++) {
+            for (let x = 0; x < inputSize; x++) {
+              const index = (y * inputSize + x) * 4; 
+              const grayscale = imageData.data[index]; 
+              inputData[y * inputSize + x] = grayscale / 255; 
+            }
+          }
+
+          return new ort.Tensor('float32', inputData, [1, 1, inputSize, inputSize]);
+        }
 
       function handleClick(button) {
         const operators = ["+", "-", "*", "/"];
@@ -110,6 +199,10 @@
       function toggleSound(){
         soundEnabled.value = !soundEnabled.value;
       }
+      function toggleDarkMode () {
+        isDarkmode.value = !isDarkmode.value; 
+      };
+
 
       onMounted(()=>{
         setTimeout(()=>{
@@ -121,53 +214,64 @@
         display,
         buttonArray,
         handleClick,
-        isVisible,
-        toggleSound
+        toggleSound,
+        isDarkmode,
+        toggleDarkMode,
+        startDrawing,
+        draw,
+        stopDrawing,
       };
     }
   }
   </script>
   
-
-  <style scoped>
-  .calculator {
-    display: inline-block;
-    text-align: center;
-    margin: 100px auto;
-    opacity: 0; 
-    transition: opacity 1s ease-in; 
+  <style>
+  .CalculatorLogic {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%; 
+    width: 100%;  
+    background-color: var(--background-color, white);
+    transition: background-color 0.3s ease; 
+    overflow: hidden; 
   }
 
+  .CalculatorLogic.dark {
+    background-color: black; 
+    color: white;
+  }
+
+
+  
   .fadeIn {
     opacity: 1; 
   }
-
+  
   .display {
-    width: calc(100% - 20px); 
-    height: 150px;
-    font-size: 20px;
-    text-align: left;
+    width: 100%; 
+    height: 30%;
+    font-size: 40px; 
+    text-align: center;
     margin-bottom: 20px; 
     padding: 15px; 
-    border: 2px solid #ccc; 
-    border-radius: 8px;
-    background-color: #f9f9f9; 
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1); 
-    transition: border-color 0.3s, box-shadow 0.3s; 
+    border: none; 
+    background-color: transparent; 
+    color: rgb(0, 0, 0); 
+    transition: box-shadow 0.3s; 
   }
-
+  
   .display:focus {
     outline: none; 
-    border-color: #66afe9; 
-    box-shadow: 0 0 5px rgba(102, 175, 233, 0.6)
   }
-
+  
   .buttons {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: 15px;
   }
-
+  
   button {
     width: 80px;
     height: 80px;
@@ -176,15 +280,36 @@
     display: flex; 
     justify-content: center; 
     align-items: center; 
-    background-color: #f0f0f0;
+    background-color: #f0f0f0; 
     border: none;
     border-radius: 8px;
     transition: transform 0.1s ease, box-shadow 0.1s ease;
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
   }
-
+  
   button:active {
     transform: translateY(2px);
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  }
+  
+  .canvas {
+    border: 1px solid #ccc;
+    width: 300px;
+    height: 300px;
+    margin-bottom: 20px;
+  }
+  
+  .dark .display {
+    background-color: #2a2a2a; 
+    color: white; 
+  }
+  
+  .dark button {
+    background-color: #3a3a3a; 
+    color: white; 
+  }
+  
+  .dark button:hover {
+    background-color: #4a4a4a;
   }
   </style>
